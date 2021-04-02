@@ -86,8 +86,8 @@ def encode_msg(b: bytes) -> bytearray:
 
 
 def get_byte_bits(b: int) -> str:
-    return "0b" + "".join([str((b >> i) & 0b1) for i in range(7, -1, -1)])
-
+    # return "0b" + "".join([str((b >> i) & 0b1) for i in range(7, -1, -1)])
+    return hex(b)
 
 def get_message_bits(b: bytes) -> str:
     return " ".join([get_byte_bits(byte) for byte in b])
@@ -153,13 +153,13 @@ def crete_server_interface(my_socket: SocketServer):
     msg_text_res = tkinter.Label(window, text=f"")
     msg_text_res.grid(column=1, row=1)
 
-    msg_binary = tkinter.Label(window, text=f"Binary message (LSB right):")
+    msg_binary = tkinter.Label(window, text=f"Binary message:")
     msg_binary.grid(column=0, row=2)
     msg_binary_res = tkinter.Label(window, text=f"")
     msg_binary_res.grid(column=1, row=2)
 
     msg_binary_decrypt = tkinter.Label(
-        window, text=f"Binary decrypted message (LSB right):"
+        window, text=f"Binary decrypted message:"
     )
     msg_binary_decrypt.grid(column=0, row=3)
     msg_binary_decrypt_res = tkinter.Label(window, text=f"")
@@ -247,13 +247,13 @@ def crete_client_interface(my_socket: SocketClient):
     msg_text_res = tkinter.Label(window, text=f"")
     msg_text_res.grid(column=1, row=3)
 
-    msg_binary = tkinter.Label(window, text=f"Binary message (LSB right):")
+    msg_binary = tkinter.Label(window, text=f"Binary message:")
     msg_binary.grid(column=0, row=4)
     msg_binary_res = tkinter.Label(window, text=f"")
     msg_binary_res.grid(column=1, row=4)
 
     msg_binary_decrypt = tkinter.Label(
-        window, text=f"Binary encrypter message (LSB right):"
+        window, text=f"Binary encrypter message:"
     )
     msg_binary_decrypt.grid(column=0, row=5)
     msg_binary_encrypt_res = tkinter.Label(window, text=f"")
