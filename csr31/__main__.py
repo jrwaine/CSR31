@@ -11,10 +11,16 @@ from matplotlib.figure import Figure
 
 # Secret key
 key = 0xFE
+PORT_SERVER = 3000
 
 ZERO_TENSION = 0b01
 POS_TENSION = 0b10
 NEG_TENSION = 0b00
+
+TEST_VAL = bytes([0b010010])
+ONLY_TEST = False
+CRYPT = True
+ENCODE = "utf-8"
 
 
 class SocketServer:
@@ -23,12 +29,12 @@ class SocketServer:
         try:
             self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.s.bind(("localhost", 3000))
+            self.s.bind(("localhost", PORT_SERVER))
             self.s.listen()
             self.conn, self.addr = self.s.accept()
             msg = self.conn.recv(1024)
             self.conn.close()
-            return msg  # type: ignore
+            return msg
         except:
             return b""
 
@@ -43,18 +49,22 @@ class SocketClient:
 
 
 def cript_msg(b: str) -> bytes:
-    if not b.isascii():
-        raise ValueError("Invalid message. Only ASCII characters allowed")
-    msg = b.encode("ascii")
-    # TODO:
-    return bytes([m ^ key for m in msg])
+    global CRYPT, ENCODE
+    # if not b.isascii():
+    #     raise ValueError("Invalid message. Only UTF-8 characters allowed")
+    msg = b.encode(ENCODE)
+    if CRYPT:
+        return bytes([m ^ key for m in msg])
+    return msg
 
 
 def decrypt_msg(b: bytes) -> str:
-    # TODO: decrypt
-    b_dec = bytes([bn ^ key for bn in b])
+    global CRYPT, ENCODE
+    b_dec = b
+    if CRYPT:
+        b_dec = bytes([bn ^ key for bn in b])
     try:
-        msg = b_dec.decode("ascii")
+        msg = b_dec.decode(ENCODE)
         return msg
     except Exception as e:
         raise ValueError(f"Error decoding bytes {b!r}. Check keys") from e
@@ -73,6 +83,14 @@ def encode_msg(b: bytes) -> bytearray:
                 bytes_encoded.append(POS_TENSION if positive_1 else NEG_TENSION)
                 positive_1 = not positive_1
     return bytes_encoded
+
+
+def get_byte_bits(b: int) -> str:
+    return "0b" + "".join([str((b >> i) & 0b1) for i in range(7, -1, -1)])
+
+
+def get_message_bits(b: bytes) -> str:
+    return " ".join([get_byte_bits(byte) for byte in b])
 
 
 def decode_msg(b: bytes) -> bytes:
@@ -117,7 +135,7 @@ def plot_signal(b: bytes, msg: str, side: str):
     a.set_yticks([0, 1, 2])
     a.set_yticklabels(["-V", 0, "+V"])
     a.set_title(f"signal for '{msg}'")
-    fig.savefig(f"csr31/plots/{msg}_{side}.png")
+    # fig.savefig(f"csr31/plots/{msg}_{side}.png")
     return fig
 
 
@@ -127,10 +145,30 @@ def crete_server_interface(my_socket: SocketServer):
     window.title(f"Server")
     window.geometry("720x720")
 
+    lbl = tkinter.Label(window, text=f"Running server on port {PORT_SERVER}")
+    lbl.grid(column=0, row=0, columnspan=2)
+
+    msg_text = tkinter.Label(window, text=f"Message text:")
+    msg_text.grid(column=0, row=1)
+    msg_text_res = tkinter.Label(window, text=f"")
+    msg_text_res.grid(column=1, row=1)
+
+    msg_binary = tkinter.Label(window, text=f"Binary message (LSB right):")
+    msg_binary.grid(column=0, row=2)
+    msg_binary_res = tkinter.Label(window, text=f"")
+    msg_binary_res.grid(column=1, row=2)
+
+    msg_binary_decrypt = tkinter.Label(
+        window, text=f"Binary decrypted message (LSB right):"
+    )
+    msg_binary_decrypt.grid(column=0, row=3)
+    msg_binary_decrypt_res = tkinter.Label(window, text=f"")
+    msg_binary_decrypt_res.grid(column=1, row=3)
+
     def draw_signal(signal: bytes, msg: str):
         figure = plot_signal(signal, msg, "server")
         canvas = FigureCanvasTkAgg(figure, window)
-        canvas.get_tk_widget().grid(column=0, row=2)
+        canvas.get_tk_widget().grid(column=0, row=4, columnspan=2)
         canvas.draw()
         msg_box = tkinter.messagebox.showinfo(title="Info", message=f"Received '{msg}'")
 
@@ -148,6 +186,7 @@ def crete_server_interface(my_socket: SocketServer):
     def handle_msgs(thread=None):
         if thread is None:
             thread = AsyncRecvMsg(my_socket)
+            thread.daemon = True
             thread.start()
 
         if thread.is_alive():
@@ -156,9 +195,20 @@ def crete_server_interface(my_socket: SocketServer):
             try:
                 bytes_encoded = thread.msg
                 bytes_decoded = decode_msg(bytes_encoded)
-                msg_decript = decrypt_msg(bytes_decoded)
+                msg_binary_res.config(text=get_message_bits(bytes_decoded))
+                try:
+                    msg_decript = decrypt_msg(bytes_decoded)
+                    msg_binary_decrypt_res.config(
+                        text=get_message_bits(bytes(msg_decript.encode(ENCODE)))
+                    )
+                except:
+                    msg_decript = "**unable to decript it**"
+                msg_text_res.config(text=msg_decript)
                 print(msg_decript)
-                draw_signal(bytes_encoded, msg_decript)
+                try:
+                    draw_signal(bytes_encoded, msg_decript)
+                except:
+                    draw_signal(bytes_encoded, "**can't print msg**")
                 print(f"received message {msg_decript}")
             except Exception as e:
                 print("error", e)
@@ -169,7 +219,7 @@ def crete_server_interface(my_socket: SocketServer):
 
 
 def crete_client_interface(my_socket: SocketClient):
-    global PORT_SERVER
+    global PORT_SERVER, ONLY_TEST
     window = tkinter.Tk()
     window.title(f"Client")
     window.geometry("720x720")
@@ -178,29 +228,61 @@ def crete_client_interface(my_socket: SocketClient):
     lbl.grid(column=0, row=0)
     msg_ip = tkinter.Entry(window, width=30)
     msg_ip.grid(column=0, row=1)
+    msg_ip.insert(0, "localhost")
 
     lbl = tkinter.Label(window, text="Port")
     lbl.grid(column=1, row=0)
     msg_port = tkinter.Entry(window, width=10)
     msg_port.grid(column=1, row=1)
+    msg_port.insert(0, "3000")
 
-    lbl = tkinter.Label(window, text="Message to send")
-    lbl.grid(column=2, row=0)
-    msg_entry = tkinter.Entry(window, width=20)
-    msg_entry.grid(column=2, row=1)
+    if not ONLY_TEST:
+        lbl = tkinter.Label(window, text="Message to send")
+        lbl.grid(column=2, row=0)
+        msg_entry = tkinter.Entry(window, width=20)
+        msg_entry.grid(column=2, row=1)
+
+    msg_text = tkinter.Label(window, text=f"Message text:")
+    msg_text.grid(column=0, row=3)
+    msg_text_res = tkinter.Label(window, text=f"")
+    msg_text_res.grid(column=1, row=3)
+
+    msg_binary = tkinter.Label(window, text=f"Binary message (LSB right):")
+    msg_binary.grid(column=0, row=4)
+    msg_binary_res = tkinter.Label(window, text=f"")
+    msg_binary_res.grid(column=1, row=4)
+
+    msg_binary_decrypt = tkinter.Label(
+        window, text=f"Binary encrypter message (LSB right):"
+    )
+    msg_binary_decrypt.grid(column=0, row=5)
+    msg_binary_encrypt_res = tkinter.Label(window, text=f"")
+    msg_binary_encrypt_res.grid(column=1, row=5)
 
     def send_msg():
-        msg_to_send = msg_entry.get()
-        if len(msg_to_send) == 0:
-            return
+        if not ONLY_TEST:
+            msg_to_send = msg_entry.get()
+            if len(msg_to_send) == 0:
+                return
+        else:
+            msg_to_send = TEST_VAL.decode(ENCODE)
+
         try:
             port = int(msg_port.get())
             ip = msg_ip.get()
         except:
-            return
+            tkinter.messagebox.showerror(title="Error", message=f"Exception: {str(e)}")
 
         try:
+            # use TEST_VAL for tests
+            bytes_encrypted = TEST_VAL
             bytes_encrypted = cript_msg(msg_to_send)
+
+            msg_text_res.config(text=msg_to_send)
+            msg_binary_res.config(
+                text=get_message_bits(bytes(msg_to_send.encode(ENCODE)))
+            )
+            msg_binary_encrypt_res.config(text=get_message_bits(bytes_encrypted))
             bytes_encoded = encode_msg(bytes_encrypted)
             my_socket.send_msg(bytes_encoded, ip, port)
         except Exception as e:
@@ -208,13 +290,17 @@ def crete_client_interface(my_socket: SocketClient):
         else:
             figure = plot_signal(bytes_encoded, msg_to_send, "client")
             canvas = FigureCanvasTkAgg(figure, window)
-            canvas.get_tk_widget().grid(column=2, row=3)
+            canvas.get_tk_widget().grid(column=0, row=6, columnspan=3)
             canvas.draw()
             msg_box = tkinter.messagebox.showinfo(
                 title="Info", message=f"Sended {msg_to_send}"
             )
 
-    btn_send = tkinter.Button(window, text="Send message", command=send_msg)
+    if not ONLY_TEST:
+        btn_send = tkinter.Button(window, text="Send message", command=send_msg)
+    else:
+        btn_send = tkinter.Button(window, text="Send test message", command=send_msg)
+
     btn_send.grid(column=0, row=2)
 
     window.mainloop()
@@ -233,12 +319,25 @@ def run_server():
 
 
 def main():
+    global CRYPT, ONLY_TEST
     args_parser = argparse.ArgumentParser()
     args_parser.add_argument(
-        "--mode", type=str, choices=["server", "client"], help="Mode to run code"
+        "-m", "--mode", type=str, choices=["server", "client"], help="Mode to run code"
+    )
+    args_parser.add_argument(
+        "-nc", "--no-crypt", action="store_true", help="Not use cryptography"
+    )
+    args_parser.add_argument(
+        "-t", "--test-only", action="store_true", help="Run only test value"
     )
 
     args = args_parser.parse_args(sys.argv[1:])
+    if args.no_crypt:
+        CRYPT = False
+    if args.test_only:
+        ONLY_TEST = True
+        CRYPT = False
+
     if args.mode == "server":
         run_server()
     else:
