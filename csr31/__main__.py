@@ -11,9 +11,6 @@ from matplotlib.figure import Figure
 
 # Secret key
 key = 0xFE
-# ports and ips to use
-PORT_SERVER = 3000
-IP_SERVER = "localhost"
 
 ZERO_TENSION = 0b01
 POS_TENSION = 0b10
@@ -26,7 +23,7 @@ class SocketServer:
         try:
             self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.s.bind((IP_SERVER, PORT_SERVER))
+            self.s.bind(("localhost", 3000))
             self.s.listen()
             self.conn, self.addr = self.s.accept()
             msg = self.conn.recv(1024)
@@ -35,14 +32,12 @@ class SocketServer:
         except:
             return b""
 
-    def __del__(self):
-        self.s.close()
-
 
 class SocketClient:
-    def send_msg(self, b: bytes):
+    def send_msg(self, b: bytes, ip: str, port: int):
+        print(ip, port)
         self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.s.connect((IP_SERVER, PORT_SERVER))
+        self.s.connect((ip, port))
         self.s.send(b)
         self.s.close()
 
@@ -129,14 +124,8 @@ def plot_signal(b: bytes, msg: str, side: str):
 def crete_server_interface(my_socket: SocketServer):
     global PORT_SERVER, IP_SERVER
     window = tkinter.Tk()
-    window.title(f"Server on {IP_SERVER}:{PORT_SERVER}")
+    window.title(f"Server")
     window.geometry("720x720")
-
-    lbl = tkinter.Label(window, text="Port to serve")
-    lbl.grid(column=0, row=0)
-
-    msg_entry = tkinter.Entry(window, width=20)
-    msg_entry.grid(column=0, row=1)
 
     def draw_signal(signal: bytes, msg: str):
         figure = plot_signal(signal, msg, "server")
@@ -185,28 +174,42 @@ def crete_client_interface(my_socket: SocketClient):
     window.title(f"Client")
     window.geometry("720x720")
 
-    lbl = tkinter.Label(window, text="Message to send")
+    lbl = tkinter.Label(window, text="Server IP")
     lbl.grid(column=0, row=0)
+    msg_ip = tkinter.Entry(window, width=30)
+    msg_ip.grid(column=0, row=1)
 
+    lbl = tkinter.Label(window, text="Port")
+    lbl.grid(column=1, row=0)
+    msg_port = tkinter.Entry(window, width=10)
+    msg_port.grid(column=1, row=1)
+
+    lbl = tkinter.Label(window, text="Message to send")
+    lbl.grid(column=2, row=0)
     msg_entry = tkinter.Entry(window, width=20)
-    msg_entry.grid(column=0, row=1)
+    msg_entry.grid(column=2, row=1)
 
     def send_msg():
         msg_to_send = msg_entry.get()
         if len(msg_to_send) == 0:
             return
         try:
+            port = int(msg_port.get())
+            ip = msg_ip.get()
+        except:
+            return
+
+        try:
             bytes_encrypted = cript_msg(msg_to_send)
             bytes_encoded = encode_msg(bytes_encrypted)
-            my_socket.send_msg(bytes_encoded)
+            my_socket.send_msg(bytes_encoded, ip, port)
         except Exception as e:
             tkinter.messagebox.showerror(title="Error", message=f"Exception: {str(e)}")
         else:
             figure = plot_signal(bytes_encoded, msg_to_send, "client")
             canvas = FigureCanvasTkAgg(figure, window)
-            canvas.get_tk_widget().grid(column=0, row=3)
+            canvas.get_tk_widget().grid(column=2, row=3)
             canvas.draw()
-
             msg_box = tkinter.messagebox.showinfo(
                 title="Info", message=f"Sended {msg_to_send}"
             )
@@ -220,21 +223,12 @@ def crete_client_interface(my_socket: SocketClient):
 def run_client():
     print("running client")
     my_socket = SocketClient()
-
     crete_client_interface(my_socket)
-    # while True:
-    #     time.sleep(0.1)
-    #     msg_send = input("Input your message: ")
-    #     bytes_encrypted = cript_msg(msg_send)
-    #     bytes_encoded = encode_msg(bytes_encrypted)
-    #     my_socket.send_msg(bytes_encoded)
-    #     plot_signal(bytes_encoded, msg_send, "client")
 
 
 def run_server():
     print("running server")
     my_socket = SocketServer()
-
     crete_server_interface(my_socket)
 
 
