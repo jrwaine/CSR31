@@ -4,6 +4,7 @@ import sys
 import time
 import socket
 import tkinter
+import threading
 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
@@ -18,42 +19,45 @@ ZERO_TENSION = 0b01
 POS_TENSION = 0b10
 NEG_TENSION = 0b00
 
-class SocketServer:
-    def __init__(self):
-        self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.s.bind((IP_SERVER, PORT_SERVER))
-        self.s.listen(1)
-        self.conn, self.addr = self.s.accept()
 
+class SocketServer:
     def recv_msg(self) -> bytes:
-        return self.conn.recv(1024)  # type: ignore
+        print("receiving....")
+        try:
+            self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.s.bind((IP_SERVER, PORT_SERVER))
+            self.s.listen()
+            self.conn, self.addr = self.s.accept()
+            msg = self.conn.recv(1024)
+            self.conn.close()
+            return msg  # type: ignore
+        except:
+            return b""
 
     def __del__(self):
         self.s.close()
+
 
 class SocketClient:
-    def __init__(self):
+    def send_msg(self, b: bytes):
         self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.s.connect((IP_SERVER, PORT_SERVER))
-
-    def send_msg(self, b: bytes):
-        return self.s.send(b)
-
-    def __del__(self):
+        self.s.send(b)
         self.s.close()
+
 
 def cript_msg(b: str) -> bytes:
     if not b.isascii():
         raise ValueError("Invalid message. Only ASCII characters allowed")
     msg = b.encode("ascii")
     # TODO:
-    return bytes([m^key for m in msg])
+    return bytes([m ^ key for m in msg])
 
 
 def decrypt_msg(b: bytes) -> str:
     # TODO: decrypt
-    b_dec = bytes([bn^key for bn in b])
+    b_dec = bytes([bn ^ key for bn in b])
     try:
         msg = b_dec.decode("ascii")
         return msg
@@ -109,7 +113,6 @@ def decode_msg(b: bytes) -> bytes:
 
 
 def plot_signal(b: bytes, msg: str, side: str):
-
     b_plot = bytearray(b)
     b_plot.append(b_plot[-1])
     pos = list(range(len(b_plot)))
@@ -122,11 +125,65 @@ def plot_signal(b: bytes, msg: str, side: str):
     fig.savefig(f"csr31/plots/{msg}_{side}.png")
     return fig
 
+
+def crete_server_interface(my_socket: SocketServer):
+    global PORT_SERVER, IP_SERVER
+    window = tkinter.Tk()
+    window.title(f"Server on {IP_SERVER}:{PORT_SERVER}")
+    window.geometry("720x720")
+
+    lbl = tkinter.Label(window, text="Port to serve")
+    lbl.grid(column=0, row=0)
+
+    msg_entry = tkinter.Entry(window, width=20)
+    msg_entry.grid(column=0, row=1)
+
+    def draw_signal(signal: bytes, msg: str):
+        figure = plot_signal(signal, msg, "server")
+        canvas = FigureCanvasTkAgg(figure, window)
+        canvas.get_tk_widget().grid(column=0, row=2)
+        canvas.draw()
+        msg_box = tkinter.messagebox.showinfo(title="Info", message=f"Received '{msg}'")
+
+    class AsyncRecvMsg(threading.Thread):
+        def __init__(self, socket: SocketServer):
+            super().__init__()
+            self.socket = socket
+
+        def run(self):
+            response = self.socket.recv_msg()
+            while response == b"":
+                response = self.socket.recv_msg()
+            self.msg = response
+
+    def handle_msgs(thread=None):
+        if thread is None:
+            thread = AsyncRecvMsg(my_socket)
+            thread.start()
+
+        if thread.is_alive():
+            window.after(100, handle_msgs, thread)
+        else:
+            try:
+                bytes_encoded = thread.msg
+                bytes_decoded = decode_msg(bytes_encoded)
+                msg_decript = decrypt_msg(bytes_decoded)
+                print(msg_decript)
+                draw_signal(bytes_encoded, msg_decript)
+                print(f"received message {msg_decript}")
+            except Exception as e:
+                print("error", e)
+            window.after(100, handle_msgs)
+
+    window.after(100, handle_msgs)
+    window.mainloop()
+
+
 def crete_client_interface(my_socket: SocketClient):
     global PORT_SERVER
     window = tkinter.Tk()
-    window.title(f"Server on {PORT_SERVER}")
-    window.geometry('720x720')
+    window.title(f"Client")
+    window.geometry("720x720")
 
     lbl = tkinter.Label(window, text="Message to send")
     lbl.grid(column=0, row=0)
@@ -136,21 +193,29 @@ def crete_client_interface(my_socket: SocketClient):
 
     def send_msg():
         msg_to_send = msg_entry.get()
-        bytes_encrypted = cript_msg(msg_to_send)
-        bytes_encoded = encode_msg(bytes_encrypted)
-        my_socket.send_msg(bytes_encoded)
+        if len(msg_to_send) == 0:
+            return
+        try:
+            bytes_encrypted = cript_msg(msg_to_send)
+            bytes_encoded = encode_msg(bytes_encrypted)
+            my_socket.send_msg(bytes_encoded)
+        except Exception as e:
+            tkinter.messagebox.showerror(title="Error", message=f"Exception: {str(e)}")
+        else:
+            figure = plot_signal(bytes_encoded, msg_to_send, "client")
+            canvas = FigureCanvasTkAgg(figure, window)
+            canvas.get_tk_widget().grid(column=0, row=3)
+            canvas.draw()
 
-        figure = plot_signal(bytes_encoded, msg_to_send, "client")
-        canvas = FigureCanvasTkAgg(figure, window)
-        canvas.get_tk_widget().grid(column=0, row=3)
-        canvas.draw()
+            msg_box = tkinter.messagebox.showinfo(
+                title="Info", message=f"Sended {msg_to_send}"
+            )
 
-        msg_box = tkinter.messagebox.showinfo(title="Info", message=f"Sended {msg_to_send}")
-
-    btn_send = tkinter.Button(window, text="Send message", command= send_msg)
+    btn_send = tkinter.Button(window, text="Send message", command=send_msg)
     btn_send.grid(column=0, row=2)
 
     window.mainloop()
+
 
 def run_client():
     print("running client")
@@ -169,18 +234,9 @@ def run_client():
 def run_server():
     print("running server")
     my_socket = SocketServer()
-    while True:
-        try:
-            time.sleep(0.1)
-            bytes_encoded = my_socket.recv_msg()
-            if bytes_encoded == b"":
-                continue
-            bytes_decoded = decode_msg(bytes_encoded)
-            msg_decript = decrypt_msg(bytes_decoded)
-            plot_signal(bytes_encoded, msg_decript, "server")
-            print(f"received message {msg_decript}")
-        except:
-            exit()
+
+    crete_server_interface(my_socket)
+
 
 def main():
     args_parser = argparse.ArgumentParser()

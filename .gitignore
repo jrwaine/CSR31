@@ -1,3 +1,5 @@
+.vscode
+
 # latex
 *.aux
 *.glo
@@ -25,4 +27,3 @@
 
 # python
 *.pyc
-.vscode
